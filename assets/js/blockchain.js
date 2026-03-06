@@ -9,6 +9,14 @@ const Blockchain = (() => {
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
+    // Stable JSON stringify (sorts object keys) to ensure deterministic hashing
+    function stableStringify(obj) {
+        if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+        if (Array.isArray(obj)) return '[' + obj.map(stableStringify).join(',') + ']';
+        const keys = Object.keys(obj).sort();
+        return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+    }
+
     // Block structure
     class Block {
         constructor(index, data, previousHash, timestamp = new Date().toISOString()) {
@@ -20,13 +28,14 @@ const Blockchain = (() => {
         }
 
         async calculateHash() {
-            const blockData = JSON.stringify({
+            const blockData = {
                 index: this.index,
                 data: this.data,
                 previousHash: this.previousHash,
                 timestamp: this.timestamp
-            });
-            this.hash = await calculateHash(blockData);
+            };
+            const canonical = stableStringify(blockData);
+            this.hash = await calculateHash(canonical);
             return this.hash;
         }
     }
@@ -47,7 +56,7 @@ const Blockchain = (() => {
 
         const block = new Block(0, genesisData, '0');
         await block.calculateHash();
-        
+
         return {
             product_id: productId,
             block_index: block.index,
@@ -55,7 +64,7 @@ const Blockchain = (() => {
             previous_hash: block.previousHash,
             hash: block.hash,
             created_by: createdBy,
-            created_at: new Date().toISOString()
+            created_at: block.timestamp
         };
     }
 
@@ -81,7 +90,7 @@ const Blockchain = (() => {
             previous_hash: block.previousHash,
             hash: block.hash,
             created_by: actorId,
-            created_at: new Date().toISOString()
+            created_at: block.timestamp
         };
     }
 
@@ -92,8 +101,11 @@ const Blockchain = (() => {
         for (let i = 0; i < blocks.length; i++) {
             const block = blocks[i];
 
+            // Prefer using timestamp embedded in block.data (this was used when hashing), fallback to created_at
+            const timestamp = block.data?.timestamp || block.created_at;
+
             // Verify current block hash
-            const tempBlock = new Block(block.block_index, block.data, block.previous_hash, block.created_at);
+            const tempBlock = new Block(block.block_index, block.data, block.previous_hash, timestamp);
             const calculatedHash = await tempBlock.calculateHash();
 
             if (calculatedHash !== block.hash) {

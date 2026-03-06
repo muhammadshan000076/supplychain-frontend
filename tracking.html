@@ -4,23 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Track Products - Decentralized Supply Chain Management System</title>
+    <link rel="icon" href="assets/img/blockchain-logo.svg" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/img/blockchain-logo.png">
     <link rel="stylesheet" href="assets/css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
     <script src="assets/js/data.js"></script>
     <script src="assets/js/supabase.js"></script>
     <script src="assets/js/blockchain.js"></script>
+    <script src="assets/js/verification.js"></script>
     <script src="assets/js/tracking.js"></script>
     <script src="assets/js/realtime.js"></script>
 </head>
 <body>
     <header class="header">
         <div class="container" style="display: flex; align-items: center; gap: 1rem;">
-            <i class="fas fa-link" style="font-size:1.8rem;"></i>
+            <img src="assets/img/blockchain-logo.png" alt="Blockchain Logo" class="app-logo app-logo--large">
             <h1>Decentralized Supply Chain Management System</h1>
             <nav>
                 <a href="dashboard.html">Dashboard</a>
-                <a href="#" onclick="logout(); return false;">Logout</a>
             </nav>
         </div>
     </header>
@@ -94,7 +96,6 @@
         </div>
     </footer>
 
-    <script src="assets/js/supabase.js"></script>
     <script>
         document.getElementById('year').textContent = new Date().getFullYear();
 
@@ -106,63 +107,69 @@
 
         document.getElementById('track-product-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const productId = document.getElementById('product-id').value.trim();
+            const rawInput = document.getElementById('product-id').value.trim();
+            let productId = rawInput;
             const errorEl = document.getElementById('track-error');
             const detailsEl = document.getElementById('product-details');
-            
+
             errorEl.textContent = '';
             detailsEl.style.display = 'none';
 
             try {
                 await ensureSupabaseReady();
-                
-                const { data: product, error: pErr } = await supabaseClient
-                    .from('products')
-                    .select('*')
-                    .eq('id', productId)
-                    .single();
 
-                if (pErr) throw new Error('Product not found');
-                if (!product) throw new Error('No matching product');
-
-                const { data: events, error: eErr } = await supabaseClient
-                    .from('supply_chain_events')
-                    .select('*')
-                    .eq('product_id', productId)
-                    .order('timestamp', { ascending: true });
-
-                if (eErr) throw eErr;
-
-                // Display product info
-                document.getElementById('prod-name').textContent = product.name;
-                document.getElementById('prod-batch').textContent = product.batch_number;
-                document.getElementById('prod-date').textContent = new Date(product.created_at).toLocaleDateString();
-                document.getElementById('prod-qr').src = product.qr_code;
-
-                // Display timeline
-                const timeline = document.getElementById('product-timeline');
-                timeline.innerHTML = '';
-                
-                if (events && events.length > 0) {
-                    events.forEach(ev => {
-                        const li = document.createElement('li');
-                        li.innerHTML = `
-                            <div class="timeline-content">
-                                <div class="timeline-time">${new Date(ev.timestamp).toLocaleString()}</div>
-                                <div class="timeline-text">
-                                    <strong>${ev.role}</strong> updated at <strong>${ev.location}</strong>
-                                    <br>Status: <span style="color: var(--primary);">${ev.status}</span>
-                                </div>
-                            </div>
-                        `;
-                        timeline.appendChild(li);
-                    });
-                } else {
-                    timeline.innerHTML = '<li><p style="color: var(--text-light);">No movement history yet</p></li>';
+                try {
+                    const parsed = new URL(rawInput, window.location.origin);
+                    const v = parsed.searchParams.get('verify') || parsed.searchParams.get('id') || parsed.searchParams.get('product');
+                    if (v) productId = v;
+                    else {
+                        const parts = parsed.pathname.split('/').filter(Boolean);
+                        if (parts.length) productId = parts[parts.length - 1];
+                    }
+                } catch (err) {
+                    if (rawInput.includes('verify=')) productId = rawInput.split('verify=')[1].split('&')[0];
                 }
 
-                detailsEl.style.display = 'block';
-                detailsEl.scrollIntoView({ behavior: 'smooth' });
+                if (Verification) {
+                    const res = await Verification.verifyProduct(productId.trim(), supabaseClient);
+                    const product = res.product;
+                    const blocks = res.blocks || [];
+
+                    if (!product) throw new Error('Product not found');
+
+                    // Display product info
+                    document.getElementById('prod-name').textContent = product.name;
+                    document.getElementById('prod-batch').textContent = product.batch_number;
+                    document.getElementById('prod-date').textContent = new Date(product.created_at).toLocaleDateString();
+                    document.getElementById('prod-qr').src = product.qr_code;
+
+                    // Display timeline
+                    const timeline = document.getElementById('product-timeline');
+                    timeline.innerHTML = '';
+                    if (blocks.length === 0) {
+                        timeline.innerHTML = '<li><p style="color: var(--text-light);">No movement history yet</p></li>';
+                    } else {
+                        blocks.forEach(b => {
+                            const data = b.data || {};
+                            const li = document.createElement('li');
+                            li.innerHTML = `
+                                <div class="timeline-content">
+                                    <div class="timeline-time">${new Date(data.timestamp || b.created_at).toLocaleString()}</div>
+                                    <div class="timeline-text">
+                                        <strong>${data.status || 'Update'}</strong> at <strong>${data.location || 'Unknown'}</strong>
+                                        <br>Status: <span style="color: var(--primary);">${data.status || ''}</span>
+                                    </div>
+                                </div>
+                            `;
+                            timeline.appendChild(li);
+                        });
+                    }
+
+                    detailsEl.style.display = 'block';
+                    detailsEl.scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    throw new Error('Verification module not available');
+                }
 
             } catch (err) {
                 console.error(err);

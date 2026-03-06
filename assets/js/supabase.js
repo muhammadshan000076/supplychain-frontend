@@ -47,24 +47,4 @@ async function requireAuth() {
     return session;
 }
 
-// seed demo products/events if none exist
-async function seedDemoData() {
-    try {
-        await ensureSupabaseReady();
-        const { count } = await supabaseClient.from('products').select('*', { count: 'exact' });
-        if (count === 0) {
-            const samples = [
-                { id: '11111111-1111-4111-8111-111111111111', name: 'Widget A', batch_number: 'B1001', description: 'Standard widget', manufacturing_date: '2025-10-01', image_url: 'https://via.placeholder.com/80?text=Widget+A' },
-                { id: '22222222-2222-4222-8222-222222222222', name: 'Gadget B', batch_number: 'B2002', description: 'Advanced gadget', manufacturing_date: '2025-11-15', image_url: 'https://via.placeholder.com/80?text=Gadget+B' },
-                { id: '33333333-3333-4333-8333-333333333333', name: 'Device C', batch_number: 'B3003', description: 'Prototype device', manufacturing_date: '2025-12-05', image_url: 'https://via.placeholder.com/80?text=Device+C' }
-            ];
-            for (const p of samples) {
-                await supabaseClient.from('products').insert([p]);
-            }
-        }
-    } catch (e) {
-        console.error('Demo seed failed', e);
-    }
-}
-
-window.seedDemoData = seedDemoData;
+// Demo seeding removed for production

@@ -263,6 +263,20 @@ body{
     border-radius:4px;
 }
 
+/* application logo used for blockchain branding */
+.app-logo{
+    height:28px;
+    width:auto;
+    max-width:100%;
+    vertical-align:middle;
+    display:inline-block;
+    object-fit:contain;
+    -o-object-fit:contain;
+}
+
+.app-logo--large{ height:40px; }
+.app-logo--small{ height:16px; }
+
 /* forms */
 .auth-container{
     display:flex;
@@ -609,6 +623,26 @@ body{
     flex:1;
     padding:2rem;
     overflow-y:auto;
+}
+
+/* table helpers for consistent alignment */
+.card table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:auto;
+}
+.card table th,
+.card table td{
+    padding:0.75rem;
+    text-align:left;
+    vertical-align:middle;
+    border-bottom:1px solid var(--border);
+    word-break:break-word;
+}
+.card table th{
+    background:var(--light-bg);
+    border-bottom:2px solid var(--border);
+    font-weight:700;
 }
 
 .card{

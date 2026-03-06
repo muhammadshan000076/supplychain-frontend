@@ -19,9 +19,9 @@ const reports = (() => {
 
         // Build HTML layout
         let html = `
-            <div class="cards-grid">
+                <div class="cards-grid">
                 <div class="stat-card">
-                    <h4><i class="fas fa-cube"></i> Total Products</h4>
+                    <h4><img src="assets/img/blockchain-logo.png" alt="Blockchain Logo" class="app-logo"> Total Products</h4>
                     <div class="number">${stats.totalProducts}</div>
                 </div>
                 <div class="stat-card" style="background:linear-gradient(135deg, var(--secondary) 0%, #047857 100%);">
@@ -185,12 +185,7 @@ const reports = (() => {
     }
 
     async function getCount(table) {
-        if (!supabaseClient) {
-            if (window.demoData && window.demoData[table]) {
-                return window.demoData[table].length;
-            }
-            return 0;
-        }
+        if (!supabaseClient) return 0;
         try {
             const { count, error } = await supabaseClient.from(table).select('*', { count: 'exact' });
             if (error) throw error;

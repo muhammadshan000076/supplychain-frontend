@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Manufacturer Dashboard - Supply Chain Management</title>
+    <link rel="icon" href="assets/img/blockchain-logo.svg" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/img/blockchain-logo.png">
     <link rel="stylesheet" href="assets/css/styles.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
@@ -28,7 +30,6 @@
                 <button id="menu-toggle" class="menu-toggle" aria-label="Toggle menu">Menu</button>
                 <div class="topbar-right">
                     <span id="user-role">Loading...</span>
-                    <button id="logout-btn" class="btn-sm" onclick="logout()">Logout</button>
                 </div>
             </header>
             <section class="dashboard" id="dashboard-section">
@@ -44,6 +45,7 @@
     <script src="assets/js/auth.js"></script>
     <script src="assets/js/products.js"></script>
     <script src="assets/js/realtime.js"></script>
+    <script src="assets/js/tracking.js"></script>
     <script>
         document.querySelectorAll('[data-section]').forEach(link => {
             link.addEventListener('click', (e) => {
@@ -96,7 +98,7 @@
                         <div class="number">${productCount || 0}</div>
                     </div>
                     <div class="stat-card" style="background:linear-gradient(135deg, var(--secondary) 0%, #047857 100%);">
-                        <h4><i class="fas fa-link"></i> Blockchain Blocks</h4>
+                        <h4><img src="assets/img/blockchain-logo.png" alt="Blockchain Logo" class="app-logo"> Blockchain Blocks</h4>
                         <div class="number">${blocks?.length || 0}</div>
                     </div>
                 `;
@@ -137,11 +139,11 @@
                     return;
                 }
 
-                let html = '<table style="width:100%;border-collapse:collapse;margin-top:1rem;"><tr style="background:var(--light-bg);"><th style="padding:0.75rem;text-align:left;border-bottom:2px solid var(--border);">Product Name</th><th style="padding:0.75rem;text-align:left;border-bottom:2px solid var(--border);">Batch Number</th><th style="padding:0.75rem;text-align:left;border-bottom:2px solid var(--border);">Date</th></tr>';
+                let html = '<table style="margin-top:1rem;"><tr><th>Product Name</th><th>Batch Number</th><th>Date</th><th>Product ID</th></tr>';
                 
                 data.forEach(product => {
                     const dateStr = new Date(product.created_at).toLocaleDateString();
-                    html += `<tr style="border-bottom:1px solid var(--border);"><td style="padding:0.75rem;">${product.name}</td><td style="padding:0.75rem;">${product.batch_number}</td><td style="padding:0.75rem;font-size:0.9rem;">${dateStr}</td></tr>`;
+                    html += `<tr><td>${product.name}</td><td>${product.batch_number}</td><td style="font-size:0.9rem;">${dateStr}</td><td><code style="font-size:0.85rem;color:#666;word-break:break-all;">${product.id}</code> <button class="btn-sm" data-copy="${product.id}" style="margin-left:0.5rem;">Copy</button></td></tr>`;
                 });
                 
                 html += '</table>';

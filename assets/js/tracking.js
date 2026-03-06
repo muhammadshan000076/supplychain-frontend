@@ -1,6 +1,21 @@
 // tracking.js - status updates and tracking with blockchain verification
 const tracking = (() => {
+    // Global delegated copy handler so any page can use buttons with `data-copy`
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-copy]');
+        if (!btn) return;
+        const val = btn.getAttribute('data-copy');
+        if (!val) return;
+        navigator.clipboard?.writeText(val).then(() => {
+            const original = btn.textContent;
+            btn.textContent = 'Copied';
+            setTimeout(() => { try { btn.textContent = original; } catch (e) {} }, 1400);
+        }).catch(() => {
+            alert('Copy failed — select and copy the ID manually');
+        });
+    });
     async function init() {
+        if (typeof ensureSupabaseReady === 'function') await ensureSupabaseReady();
         const container = document.getElementById('status-form-container');
         container.innerHTML = `
             <form id="status-form">
@@ -30,13 +45,37 @@ const tracking = (() => {
         `;
         document.getElementById('status-form').addEventListener('submit', updateStatus);
         loadProductList();
+        // Delegate copy buttons
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-copy]');
+            if (!btn) return;
+            const val = btn.getAttribute('data-copy');
+            navigator.clipboard?.writeText(val).then(() => {
+                btn.textContent = 'Copied';
+                setTimeout(() => btn.textContent = 'Copy', 1500);
+            }).catch(() => {
+                alert('Copy failed, select and copy manually');
+            });
+        });
     }
 
     async function updateStatus(e) {
         e.preventDefault();
         const form = e.target;
         const submitBtn = form.querySelector('button[type="submit"]');
-        const product_id = document.getElementById('product-id').value.trim();
+        let product_id = document.getElementById('product-id').value.trim();
+        // Accept full verification URL or raw UUID
+        try {
+            const parsed = new URL(product_id, window.location.origin);
+            const v = parsed.searchParams.get('verify') || parsed.searchParams.get('product') || parsed.searchParams.get('id');
+            if (v) product_id = v;
+            else {
+                const parts = parsed.pathname.split('/').filter(Boolean);
+                if (parts.length) product_id = parts[parts.length - 1];
+            }
+        } catch (err) {
+            if (product_id.includes('verify=')) product_id = product_id.split('verify=')[1].split('&')[0];
+        }
         const location = document.getElementById('location').value.trim();
         const status = document.getElementById('status').value.trim();
         const err = document.getElementById('status-error');
@@ -100,18 +139,19 @@ const tracking = (() => {
         } catch (err) {
             console.warn('Using demo data for product list', err);
         }
-        if (items.length === 0 && window.demoData && window.demoData.products) {
-            items = window.demoData.products.map(p => ({id:p.id,name:p.name,image_url:p.image_url}));
-        }
+        // no demo fallback; show real data only
         if (items.length === 0) {
             listDiv.textContent = 'No products available';
             return;
         }
         let html = '<ul style="list-style:none;padding:0;margin:0;">';
         items.forEach(p => {
-            html += `<li style="padding:0.75rem;margin:0.5rem 0;background:var(--light-bg);border-radius:6px;">
-                <strong>${p.name}</strong><br>
-                <code style="font-size:0.8rem;color:#666;word-break:break-all;">${p.id.substring(0,16)}...</code>
+            html += `<li style="padding:0.75rem;margin:0.5rem 0;background:var(--light-bg);border-radius:6px;display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+                <div>
+                    <strong>${p.name}</strong><br>
+                    <code style="font-size:0.8rem;color:#666;word-break:break-all;">${p.id}</code>
+                </div>
+                <div style="flex-shrink:0;"><button class="btn-sm" data-copy="${p.id}">Copy ID</button></div>
             </li>`;
         });
         html += '</ul>';
@@ -119,6 +159,7 @@ const tracking = (() => {
     }
 
     async function initCustomer() {
+        if (typeof ensureSupabaseReady === 'function') await ensureSupabaseReady();
         const container = document.getElementById('track-form-container');
         container.innerHTML = `
             <form id="track-form">
@@ -129,6 +170,7 @@ const tracking = (() => {
                 <button type="submit" class="btn">Track</button>
                 <div id="track-error" class="error-message"></div>
             </form>
+            <div id="track-result" style="margin-top:1rem;"></div>
             <div id="customer-products" class="card" style="margin-top:2rem;"><h4>Available Products</h4><div id="cust-product-list" style="font-size:0.9rem;color:var(--text-light);">Loading...</div></div>
         `;
         document.getElementById('track-form').addEventListener('submit', showTrack);
@@ -147,9 +189,7 @@ const tracking = (() => {
         } catch (err) {
             console.warn('Customer list using demo data', err);
         }
-        if (items.length === 0 && window.demoData && window.demoData.products) {
-            items = window.demoData.products.map(p => ({id:p.id,name:p.name,image_url:p.image_url}));
-        }
+        // no demo fallback; show real data only
         if (items.length === 0) {
             listDiv.textContent = 'No products available';
             return;
@@ -157,7 +197,10 @@ const tracking = (() => {
         let html = '<ul style="list-style:none;padding:0;">';
         items.forEach(p => {
             const img = p.image_url ? `<img src="${p.image_url}" class="product-thumb" style="height:30px;vertical-align:middle;margin-right:0.5rem" alt="${p.name}">` : '';
-            html += `<li>${img}<code>${p.id.substring(0,8)}...</code> ${p.name}</li>`;
+            html += `<li style="padding:0.5rem 0;display:flex;align-items:center;justify-content:space-between;gap:1rem;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">${img}<div><div style="font-weight:600;">${p.name}</div><code style="font-size:0.8rem;color:#666;word-break:break-all;">${p.id}</code></div></div>
+                <div style="flex-shrink:0;"><button class="btn-sm" data-copy="${p.id}">Copy ID</button></div>
+            </li>`;
         });
         html += '</ul>';
         listDiv.innerHTML = html;
@@ -166,7 +209,18 @@ const tracking = (() => {
     async function showTrack(e) {
         e.preventDefault();
         const form = document.getElementById('track-form');
-        const id = document.getElementById('track-id').value.trim();
+        let id = document.getElementById('track-id').value.trim();
+        try {
+            const parsed = new URL(id, window.location.origin);
+            const v = parsed.searchParams.get('verify') || parsed.searchParams.get('product') || parsed.searchParams.get('id');
+            if (v) id = v;
+            else {
+                const parts = parsed.pathname.split('/').filter(Boolean);
+                if (parts.length) id = parts[parts.length - 1];
+            }
+        } catch (err) {
+            if (id.includes('verify=')) id = id.split('verify=')[1].split('&')[0];
+        }
         const err = document.getElementById('track-error');
         const result = document.getElementById('track-result');
         err.textContent = '';
@@ -183,7 +237,14 @@ const tracking = (() => {
             let isChainValid = false;
             let authenticityScore = 0;
 
-            if (supabaseClient && Blockchain) {
+            // Use Verification helper which supports friendly strings and UUIDs
+            if (Verification) {
+                const result = await Verification.verifyProduct(id, supabaseClient);
+                product = result.product;
+                blocks = result.blocks || [];
+                isChainValid = !!result.isChainValid;
+                authenticityScore = result.authenticity || 0;
+            } else if (supabaseClient && Blockchain) {
                 const { data: prodData, error: pErr } = await supabaseClient.from('products').select('*').eq('id', id).single();
                 if (pErr && pErr.code !== 'PGRST116') throw pErr;
                 if (prodData) product = prodData;
@@ -211,13 +272,13 @@ const tracking = (() => {
             const verificationBadge = `
                 <div style="margin:1rem 0;padding:1rem;border-radius:8px;${isChainValid ? 'background:#dcfce7;border:1px solid #16a34a;' : 'background:#fee2e2;border:1px solid #dc2626;'}">
                     <div style="font-weight:700;${isChainValid ? 'color:#16a34a;' : 'color:#dc2626;'}">
-                        ${isChainValid ? '✅ GENUINE PRODUCT' : '❌ VERIFICATION FAILED'}
+                            ${isChainValid ? '<i class="fas fa-check-circle"></i> GENUINE PRODUCT' : '<i class="fas fa-times-circle"></i> VERIFICATION FAILED'}
                     </div>
                     <div style="font-size:0.9rem;margin-top:0.5rem;${isChainValid ? 'color:#15803d;' : 'color:#991b1b;'}">
                         Authenticity Score: ${authenticityScore}%
                     </div>
                     <div style="font-size:0.85rem;margin-top:0.5rem;opacity:0.8;">
-                        Chain Status: ${isChainValid ? 'Valid ✓' : 'Invalid ✗'} | Blocks: ${blocks.length}
+                        Chain Status: ${isChainValid ? '<i class="fas fa-check"></i> Valid' : '<i class="fas fa-times"></i> Invalid'} | Blocks: ${blocks.length}
                     </div>
                 </div>
             `;
@@ -235,7 +296,7 @@ const tracking = (() => {
                             <div class="timeline-time">${timestamp.toLocaleString()}</div>
                             <div class="timeline-text">
                                 <strong>${Blockchain.formatStatus(data.status)}</strong><br>
-                                <span style="color:var(--text-light);font-size:0.9rem;">📍 ${data.location} | 👤 ${data.actor}</span><br>
+                                <span style="color:var(--text-light);font-size:0.9rem;"><i class="fas fa-map-marker-alt"></i> ${data.location} | <i class="fas fa-user"></i> ${data.actor}</span><br>
                                 <code style="font-size:0.8rem;color:#666;word-break:break-all;">Hash: ${block.hash}</code>
                             </div>
                         </div>

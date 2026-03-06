@@ -168,10 +168,7 @@ if (window.location.pathname.includes('dashboard-')) {
             if (userRoleElement) {
                 userRoleElement.textContent = data.name + ' (' + role + ')';
             }
-            // seed demo data if helper available (useful during development)
-            if (window.seedDemoData) {
-                window.seedDemoData().catch(err => console.warn('Seeding skipped or failed', err));
-            }
+            // No demo seeding in production
         } catch (err) {
             console.error('Dashboard initialization error:', err);
         }

@@ -10,6 +10,8 @@ const products = (() => {
     }
 
     async function init() {
+        // Ensure Supabase client is ready before rendering form
+        if (typeof ensureSupabaseReady === 'function') await ensureSupabaseReady();
         const container = document.getElementById('product-form-container');
         container.innerHTML = `
             <form id="add-product-form">
@@ -80,10 +82,7 @@ const products = (() => {
                 if (data && data.length) items = data;
             }
         } catch (err) {
-            console.warn('Supabase fetch failed, using demo data', err);
-        }
-        if (items.length === 0 && window.demoData && window.demoData.products) {
-            items = window.demoData.products;
+            console.warn('Supabase fetch failed', err);
         }
         if (items.length === 0) {
             tableDiv.textContent = 'No products available.';
@@ -119,6 +118,8 @@ const products = (() => {
 
         try {
             if (UIUtils) UIUtils.setButtonLoading(submitBtn, true);
+            // Ensure Supabase ready and session available
+            if (typeof ensureSupabaseReady === 'function') await ensureSupabaseReady();
             const { data: session } = await supabaseClient.auth.getSession();
             const manufacturer_id = session.session.user.id;
             const id = crypto.randomUUID();
@@ -179,9 +180,18 @@ const products = (() => {
             const qrDiv = document.getElementById('qr-output');
             qrDiv.innerHTML = '';
             
-            // Generate QR code with product link
+            // Generate QR code with product link (safe: fall back if QR library missing)
             const qrContent = Blockchain ? Blockchain.generateQRContent(id) : id;
-            new QRCode(qrDiv, { text: qrContent, width: 150, height: 150, colorDark: '#2563eb', colorLight: '#ffffff' });
+            try {
+                if (typeof QRCode === 'function') {
+                    new QRCode(qrDiv, { text: qrContent, width: 150, height: 150, colorDark: '#2563eb', colorLight: '#ffffff' });
+                } else {
+                    throw new Error('QRCode library not loaded');
+                }
+            } catch (qrErr) {
+                console.error('QR generation failed:', qrErr);
+                qrDiv.innerHTML = `<div style="padding:1rem;border-radius:6px;background:#fff;">QR generation failed. Product ID:<br><code style="word-break:break-all;color:#444;">${id}</code></div>`;
+            }
             
             qrDiv.innerHTML += `
                 <div style="margin-top:1rem;padding:1rem;background:var(--light-bg);border-radius:8px;">

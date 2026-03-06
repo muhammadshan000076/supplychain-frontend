@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Verify Product - Decentralized Supply Chain Management System</title>
+    <link rel="icon" href="assets/img/blockchain-logo.svg" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/img/blockchain-logo.png">
     <link rel="stylesheet" href="assets/css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
@@ -16,11 +18,10 @@
 <body>
     <header class="header">
         <div class="container" style="display: flex; align-items: center; gap: 1rem;">
-            <i class="fas fa-link" style="font-size:1.8rem;"></i>
+            <img src="assets/img/blockchain-logo.png" alt="Blockchain Logo" class="app-logo app-logo--large">
             <h1>Decentralized Supply Chain Management System</h1>
             <nav>
                 <a href="dashboard.html">Dashboard</a>
-                <a href="#" onclick="logout(); return false;">Logout</a>
             </nav>
         </div>
     </header>
@@ -45,6 +46,7 @@
                             </small>
                         </div>
                         <button type="submit" class="btn">Verify Product</button>
+                        <button type="button" id="debug-lookup" class="btn btn-secondary" style="margin-left:0.5rem;">Debug Lookup</button>
                         <div id="verify-error" class="error-message"></div>
                     </form>
                 </div>
@@ -122,7 +124,6 @@
         </div>
     </footer>
 
-    <script src="assets/js/supabase.js"></script>
     <script>
         document.getElementById('year').textContent = new Date().getFullYear();
 
@@ -134,31 +135,58 @@
 
         document.getElementById('verify-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const productCode = document.getElementById('product-code').value.trim();
+            const rawInput = document.getElementById('product-code').value.trim();
+            let productCode = rawInput;
             const errorEl = document.getElementById('verify-error');
             const resultEl = document.getElementById('verification-result');
+
+            // Accept either a raw UUID or a full verification URL (e.g. https://.../?verify=<UUID>)
+            try {
+                // Try parsing as a URL first
+                const parsed = new URL(rawInput, window.location.origin);
+                const v = parsed.searchParams.get('verify');
+                if (v) {
+                    productCode = v;
+                } else {
+                    // fallback: use last path segment
+                    const parts = parsed.pathname.split('/').filter(Boolean);
+                    if (parts.length) productCode = parts[parts.length - 1];
+                }
+            } catch (err) {
+                // Not a full URL - handle patterns like '... ?verify=UUID' or 'verify=UUID' pasted
+                const qIdx = rawInput.indexOf('?verify=');
+                if (qIdx !== -1) {
+                    try {
+                        const params = new URLSearchParams(rawInput.slice(qIdx + 1));
+                        const v2 = params.get('verify');
+                        if (v2) productCode = v2;
+                    } catch (e) {}
+                } else if (rawInput.includes('verify=')) {
+                    const parts = rawInput.split('verify=');
+                    if (parts.length > 1) productCode = parts[1].split('&')[0];
+                }
+            }
+
+            productCode = productCode.trim();
 
             errorEl.textContent = '';
             resultEl.style.display = 'none';
 
-            try {
+                try {
                 await ensureSupabaseReady();
 
-                const { data: product, error: pErr } = await supabaseClient
-                    .from('products')
-                    .select('*')
-                    .eq('id', productCode)
-                    .single();
+                // Use the shared Verification helper which accepts UUIDs or friendly strings
+                const result = await Verification.verifyProduct(productCode, supabaseClient);
+                const product = result.product;
+                const events = result.blocks && result.blocks.length ? result.blocks.map(b => ({
+                    timestamp: b.data?.timestamp || b.created_at,
+                    hash: b.hash,
+                    role: b.data?.actor || b.data?.role || 'Unknown',
+                    location: b.data?.location || 'Unknown',
+                    status: b.data?.status || 'Unknown'
+                })) : [];
 
-                if (pErr || !product) throw new Error('Product not found in system');
-
-                const { data: events, error: eErr } = await supabaseClient
-                    .from('supply_chain_events')
-                    .select('*')
-                    .eq('product_id', productCode)
-                    .order('timestamp', { ascending: true });
-
-                if (eErr) throw eErr;
+                if (!product) throw new Error('Product not found in system');
 
                 // Set status
                 const statusCard = document.getElementById('status-card');
@@ -224,6 +252,69 @@
             } catch (err) {
                 console.error(err);
                 errorEl.textContent = err.message || 'Failed to verify product';
+            }
+        });
+
+        document.getElementById('debug-lookup').addEventListener('click', async () => {
+            const rawInput = document.getElementById('product-code').value.trim();
+            if (!rawInput) return alert('Enter product ID or verify URL first');
+            let productCode = rawInput;
+            try {
+                const parsed = new URL(rawInput, window.location.origin);
+                const v = parsed.searchParams.get('verify');
+                if (v) productCode = v;
+                else {
+                    const parts = parsed.pathname.split('/').filter(Boolean);
+                    if (parts.length) productCode = parts[parts.length - 1];
+                }
+            } catch (e) {
+                if (rawInput.includes('verify=')) productCode = rawInput.split('verify=')[1].split('&')[0];
+            }
+
+            await ensureSupabaseReady();
+            const debugDiv = document.getElementById('verify-debug') || (() => {
+                const d = document.createElement('pre'); d.id = 'verify-debug'; d.style.marginTop = '1rem'; d.style.background = '#f7fafc'; d.style.padding = '1rem'; d.style.borderRadius = '8px'; d.style.border = '1px solid var(--border)'; document.querySelector('main').appendChild(d); return d;
+            })();
+
+            debugDiv.textContent = 'Querying product and blockchain blocks...';
+            try {
+                const [{ data: productData, error: prodError }, { data: blocksData, error: blocksError }] = await Promise.all([
+                    supabaseClient.from('products').select('*').eq('id', productCode).maybeSingle(),
+                    supabaseClient.from('blockchain_blocks').select('*').eq('product_id', productCode).order('block_index', { ascending: true })
+                ]);
+
+                // If blocks found and Blockchain helper available, compute calculated hashes for debugging
+                let comparisons = null;
+                if (blocksData && blocksData.length && window.Blockchain && typeof window.Blockchain.calculateHash === 'function') {
+                    comparisons = [];
+                    for (let i = 0; i < blocksData.length; i++) {
+                        const b = blocksData[i];
+                        try {
+                            const blockObj = {
+                                index: b.block_index,
+                                data: b.data,
+                                previousHash: b.previous_hash,
+                                timestamp: b.created_at
+                            };
+                            const blockString = JSON.stringify(blockObj);
+                            const calculatedHash = await window.Blockchain.calculateHash(blockString);
+                            comparisons.push({
+                                block_index: b.block_index,
+                                stored_hash: b.hash,
+                                calculated_hash: calculatedHash,
+                                previous_hash: b.previous_hash,
+                                match: calculatedHash === b.hash,
+                                blockObject: blockObj
+                            });
+                        } catch (e) {
+                            comparisons.push({ block_index: b.block_index, error: e.message || String(e) });
+                        }
+                    }
+                }
+
+                debugDiv.textContent = JSON.stringify({ queryId: productCode, product: productData, prodError, blocks: blocksData, blocksError, comparisons }, null, 2);
+            } catch (err) {
+                debugDiv.textContent = JSON.stringify({ queryId: productCode, exception: err.message || String(err) }, null, 2);
             }
         });
     </script>

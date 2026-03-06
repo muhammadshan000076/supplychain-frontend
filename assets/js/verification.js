@@ -4,14 +4,81 @@ const Verification = (() => {
     // Scan QR code result
     async function verifyProduct(productId, supabaseClient) {
         try {
-            // Fetch product
-            const { data: product, error: prodErr } = await supabaseClient
-                .from('products')
-                .select('*')
-                .eq('id', productId)
-                .single();
+            // Sanitize input: trim, remove surrounding quotes and invisible chars
+            const sanitize = (s) => {
+                if (!s || typeof s !== 'string') return '';
+                // remove zero-width and BOM chars
+                s = s.replace(/[\u200B-\u200D\uFEFF]/g, '');
+                s = s.trim();
+                // strip surrounding quotes or <> or parentheses
+                s = s.replace(/^['"\(\[<]+|['"\)\]>]+$/g, '');
+                return s;
+            };
+            productId = sanitize(productId);
 
-            if (prodErr && prodErr.code !== 'PGRST116') throw prodErr;
+            // Helper to detect UUID format
+            const isUUID = (id) => {
+                return typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+            };
+
+            // Fetch product. Accept either a UUID or a user-friendly string (name, batch number, or id prefix).
+            let product = null;
+
+            if (isUUID(productId)) {
+                const { data, error: prodErr } = await supabaseClient.from('products').select('*').eq('id', productId).single();
+                if (prodErr && prodErr.code !== 'PGRST116') throw prodErr;
+                product = data || null;
+            } else {
+                // Try exact batch number
+                try {
+                    const { data: byBatch } = await supabaseClient.from('products').select('*').eq('batch_number', productId).limit(1);
+                    if (byBatch && byBatch.length > 0) product = byBatch[0];
+                } catch (e) { /* ignore */ }
+
+                // Try name fuzzy match
+                if (!product) {
+                    try {
+                        const { data: byName } = await supabaseClient.from('products').select('*').ilike('name', `%${productId}%`).limit(1);
+                        if (byName && byName.length > 0) product = byName[0];
+                    } catch (e) { /* ignore */ }
+                }
+
+                // Try id prefix match
+                if (!product) {
+                    try {
+                        const { data: byId } = await supabaseClient.from('products').select('*').like('id', `${productId}%`).limit(1);
+                        if (byId && byId.length > 0) product = byId[0];
+                    } catch (e) { /* ignore */ }
+                }
+
+                // If still not found, product remains null
+            }
+
+            if (!product) {
+                // Fallback: maybe product row missing but blockchain blocks exist for this ID (or prefix)
+                try {
+                    // try exact match in blocks
+                    const { data: blkExact } = await supabaseClient.from('blockchain_blocks').select('product_id').eq('product_id', productId).limit(1);
+                    let resolvedId = null;
+                    if (blkExact && blkExact.length > 0) {
+                        resolvedId = blkExact[0].product_id;
+                    } else {
+                        // try prefix match on product_id in blocks
+                        const { data: blkLike } = await supabaseClient.from('blockchain_blocks').select('product_id').like('product_id', `${productId}%`).limit(1);
+                        if (blkLike && blkLike.length > 0) resolvedId = blkLike[0].product_id;
+                    }
+
+                    if (resolvedId) {
+                        const { data: prodFromBlocks, error: pErr2 } = await supabaseClient.from('products').select('*').eq('id', resolvedId).maybeSingle();
+                        if (!pErr2 && prodFromBlocks) {
+                            product = prodFromBlocks;
+                        }
+                    }
+                } catch (e) {
+                    // ignore lookup errors and proceed to return not found
+                }
+            }
+
             if (!product) {
                 return {
                     valid: false,
@@ -23,14 +90,14 @@ const Verification = (() => {
                 };
             }
 
-            // Fetch blockchain blocks
+            // Fetch blockchain blocks (use resolved product ID)
             let blocks = [];
             if (Blockchain) {
-                blocks = await Blockchain.getProductHistory(productId, supabaseClient);
+                blocks = await Blockchain.getProductHistory(product.id || productId, supabaseClient);
             }
 
             // Verify chain integrity
-            let isChainValid = true;
+            let isChainValid = false;
             if (Blockchain && blocks.length > 0) {
                 isChainValid = await Blockchain.verifyChain(blocks);
             }
@@ -38,9 +105,17 @@ const Verification = (() => {
             // Calculate authenticity
             const authenticity = Blockchain ? Blockchain.calculateAuthenticityScore(blocks) : 0;
 
+            // Build reason text for clarity
+            let reason = '';
+            if (!blocks || blocks.length === 0) {
+                reason = 'Product registered but no blockchain records found';
+            } else {
+                reason = isChainValid ? 'Blockchain verified' : 'Blockchain verification failed';
+            }
+
             return {
                 valid: isChainValid && blocks.length > 0,
-                reason: isChainValid ? 'Blockchain verified' : 'Blockchain verification failed',
+                reason,
                 product,
                 blocks,
                 isChainValid,
@@ -73,11 +148,16 @@ const Verification = (() => {
     function renderVerificationResult(container, result, userRole = 'customer') {
         if (!container) return;
 
-        const statusColor = result.valid ? '#16a34a' : '#dc2626';
-        const bgColor = result.valid ? '#dcfce7' : '#fee2e2';
-        const borderColor = result.valid ? '#16a34a' : '#dc2626';
-        const statusText = result.valid ? 'VERIFIED' : 'NOT VERIFIED';
-        const statusSymbol = result.valid ? '<i class="fas fa-check-circle"></i>' : '<i class="fas fa-times-circle"></i>';
+        // Determine high-level status banner
+        const productExists = !!result.product;
+        const chainPresent = Array.isArray(result.blocks) && result.blocks.length > 0;
+        const chainValid = !!result.isChainValid && chainPresent;
+
+        const statusColor = chainValid ? '#16a34a' : (productExists ? '#d97706' : '#dc2626');
+        const bgColor = chainValid ? '#dcfce7' : (productExists ? '#fff7ed' : '#fee2e2');
+        const borderColor = chainValid ? '#16a34a' : (productExists ? '#d97706' : '#dc2626');
+        const statusText = chainValid ? 'VERIFIED' : (productExists ? 'REGISTERED (Not on chain)' : 'NOT VERIFIED');
+        const statusSymbol = chainValid ? '<i class="fas fa-check-circle"></i>' : (productExists ? '<i class="fas fa-exclamation-triangle"></i>' : '<i class="fas fa-times-circle"></i>');
 
         let html = `
             <div style="padding:2rem 0;">
@@ -88,7 +168,8 @@ const Verification = (() => {
                 </div>
         `;
 
-        if (result.product && result.valid) {
+        // Always show product information when available, even if chain verification failed
+        if (result.product) {
             const currentStatus = Blockchain ? Blockchain.getCurrentStatus(result.blocks) : 'Unknown';
             const currentLocation = Blockchain ? Blockchain.getCurrentLocation(result.blocks) : 'Unknown';
             
@@ -136,10 +217,13 @@ const Verification = (() => {
                         </p>
                         ${userRole === 'admin' ? `<p style="margin:0.5rem 0 0 0;padding-top:0.5rem;border-top:1px solid var(--border);"><strong>Admin View:</strong> <span style="color:var(--primary);font-size:0.9rem;">Hash strings visible</span></p>` : ''}
                     </div>
-                    ${result.blocks.length > 0 ? generateBlockchainTimeline(result.blocks, userRole) : '<p style="color:var(--text-light);">No supply chain events recorded</p>'}
+                    ${result.blocks.length > 0 ? generateBlockchainTimeline(result.blocks, userRole) : '<p style="color:var(--text-light);">No blockchain records for this product</p>'}
                 </div>
             `;
-        } else if (!result.valid) {
+        } 
+
+        // If product not found, show failure explanation
+        if (!productExists) {
             html += `
                 <div class="card" style="margin:2rem 0;">
                     <h4>Verification Failed</h4>
@@ -163,8 +247,8 @@ const Verification = (() => {
             const timestamp = new Date(data.timestamp || block.created_at);
             
             // Only show hash to admin users
-            const hashDisplay = userRole === 'admin' 
-                ? `<br><code style="font-size:0.75rem;color:#666;word-break:break-all;background:#f5f5f5;padding:0.25rem 0.5rem;border-radius:3px;display:inline-block;margin-top:0.25rem;">🔐 Hash: ${block.hash}</code>` 
+                const hashDisplay = userRole === 'admin' 
+                    ? `<br><code style="font-size:0.75rem;color:#666;word-break:break-all;background:#f5f5f5;padding:0.25rem 0.5rem;border-radius:3px;display:inline-block;margin-top:0.25rem;"><i class="fas fa-lock"></i> Hash: ${block.hash}</code>` 
                 : `<code style="font-size:0.75rem;color:#999;word-break:break-all;">Block ${block.block_index}</code>`;
             
             timeline += `
@@ -173,7 +257,7 @@ const Verification = (() => {
                         <div class="timeline-time">${timestamp.toLocaleString()}</div>
                         <div class="timeline-text">
                             <strong>${Blockchain ? Blockchain.formatStatus(data.status) : data.status}</strong><br>
-                            <span style="color:var(--text-light);font-size:0.9rem;">📍 ${data.location} | 👤 ${data.actor}</span><br>
+                            <span style="color:var(--text-light);font-size:0.9rem;"><i class="fas fa-map-marker-alt"></i> ${data.location} | <i class="fas fa-user"></i> ${data.actor}</span><br>
                             ${hashDisplay}
                         </div>
                     </div>

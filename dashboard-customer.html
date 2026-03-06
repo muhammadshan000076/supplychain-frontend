@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Customer Dashboard - Supply Chain Management</title>
+    <link rel="icon" href="assets/img/blockchain-logo.svg" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/img/blockchain-logo.png">
     <link rel="stylesheet" href="assets/css/styles.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
@@ -28,7 +30,6 @@
                 <button id="menu-toggle" class="menu-toggle" aria-label="Toggle menu">Menu</button>
                 <div class="topbar-right">
                     <span id="user-role">Loading...</span>
-                    <button id="logout-btn" class="btn-sm" onclick="logout()">Logout</button>
                 </div>
             </header>
             <section class="dashboard" id="dashboard-section">
@@ -110,15 +111,33 @@
 
             document.getElementById('verify-form').addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const productId = document.getElementById('verify-product-id').value.trim();
+                const rawInput = document.getElementById('verify-product-id').value.trim();
+                let productId = rawInput;
                 const resultDiv = document.getElementById('verify-result');
                 const errorDiv = document.getElementById('verify-error');
                 errorDiv.textContent = '';
                 resultDiv.innerHTML = '<p style="text-align:center;color:var(--text-light);">Verifying product...</p>';
 
-                if (Verification) {
-                    const result = await Verification.verifyProduct(productId, supabaseClient);
-                    Verification.renderVerificationResult(resultDiv, result, 'customer');
+                try {
+                    try {
+                        const parsed = new URL(rawInput, window.location.origin);
+                        const v = parsed.searchParams.get('verify') || parsed.searchParams.get('id') || parsed.searchParams.get('product');
+                        if (v) productId = v;
+                        else {
+                            const parts = parsed.pathname.split('/').filter(Boolean);
+                            if (parts.length) productId = parts[parts.length - 1];
+                        }
+                    } catch (err) {
+                        if (rawInput.includes('verify=')) productId = rawInput.split('verify=')[1].split('&')[0];
+                    }
+
+                    if (Verification) {
+                        const result = await Verification.verifyProduct(productId.trim(), supabaseClient);
+                        Verification.renderVerificationResult(resultDiv, result, 'customer');
+                    }
+                } catch (err) {
+                    console.error(err);
+                    errorDiv.textContent = err.message || 'Verification error';
                 }
             });
         }

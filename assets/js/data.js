@@ -1,9 +1,4 @@
 // data.js - Production data management with real-time syncing
-window.demoData = {
-    users: [],
-    products: [],
-    events: []
-};
 
 // Real-time data caching for instant UI updates
 const DataCache = {
